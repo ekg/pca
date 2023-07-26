@@ -117,8 +117,9 @@ impl PCA {
     /// use ndarray::array;
     /// use pca::PCA;
     ///
-    /// let x = array![[1.0, 2.0]]; 
-    /// let pca = PCA::new();
+    /// let x = array![[1.0, 2.0],[3.0, 4.0]];
+    /// let mut pca = PCA::new();
+    /// pca.fit(x.clone(), None).unwrap();
     /// pca.transform(x).unwrap();
     /// ```
     pub fn transform(&self, mut x: Array2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {

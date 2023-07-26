@@ -14,6 +14,7 @@ Tests confirm the correspondence.
 
 ```rust
 use pca::PCA;
+use ndarray::array;
 
 // Create PCA instance
 let mut pca = PCA::new(); 
@@ -23,7 +24,7 @@ let x = array![[1.0, 2.0],
                [3.0, 4.0]];
 
 // Fit PCA model                
-pca.fit(x, None).unwrap();
+pca.fit(x.clone(), None).unwrap();
 
 // Project data
 let transformed = pca.transform(x).unwrap();
