@@ -1,6 +1,6 @@
 [package]
 name = "pca"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Erik Garrison <erik.garrison@gmail.com>"]
 edition = "2021"
 description = "principal component computation using SVD"
