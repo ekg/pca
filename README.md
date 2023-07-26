@@ -40,8 +40,10 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-pca = "0.1"
+pca = "0.1.0"
 ```
+
+Or just `cargo add pca` to get the latest version.
 
 ## Authors
 
