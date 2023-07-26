@@ -1,10 +1,18 @@
+//! Principal component analysis (PCA)
+
+#![doc = include_str!("../README.md")]
+
 use ndarray::{Array1, Array2, Axis, s};
 use ndarray_linalg::svd::SVD;
 use std::error::Error;
 
+/// Principal component analysis (PCA) structure
 pub struct PCA {
+    /// the rotation matrix
     rotation: Option<Array2<f64>>,
+    /// mean of input data
     mean: Option<Array1<f64>>,
+    /// scale of input data
     scale: Option<Array1<f64>>,
 }
 
@@ -15,6 +23,14 @@ impl Default for PCA {
 }
 
 impl PCA {
+    /// Create a new PCA struct with default values
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use pca::PCA;
+    /// let pca = PCA::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             rotation: None,
@@ -23,6 +39,29 @@ impl PCA {
         }
     }
 
+    /// Fit the PCA rotation to the data
+    ///
+    /// This computes the mean, scaling and rotation to apply PCA 
+    /// to the input data matrix.
+    ///
+    /// * `x` - Input data as a 2D array
+    /// * `tol` - Tolerance for excluding low variance components.
+    ///           If None, all components are kept.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input matrix has fewer than 2 rows.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ndarray::array;
+    /// use pca::PCA;
+    ///
+    /// let x = array![[1.0, 2.0], [3.0, 4.0]];
+    /// let mut pca = PCA::new();
+    /// pca.fit(x, None).unwrap();
+    /// ```
     pub fn fit(&mut self, mut x: Array2<f64>, tol: Option<f64>) -> Result<(), Box<dyn Error>> {
         let n = x.nrows();
         if n < 2 {
@@ -61,6 +100,27 @@ impl PCA {
         Ok(())
     }
 
+    /// Apply the PCA rotation to the data
+    ///
+    /// This projects the data into the PCA space using the 
+    /// previously computed rotation, mean and scale.
+    ///
+    /// * `x` - Input data to transform
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if PCA has not been fitted yet.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ndarray::array;
+    /// use pca::PCA;
+    ///
+    /// let x = array![[1.0, 2.0]]; 
+    /// let pca = PCA::new();
+    /// pca.transform(x).unwrap();
+    /// ```
     pub fn transform(&self, mut x: Array2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {
         match (&self.rotation, &self.mean, &self.scale) {
             (Some(rotation), Some(mean), Some(scale)) => {
