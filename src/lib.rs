@@ -137,7 +137,9 @@ impl PCA {
 
 #[cfg(test)]
 mod tests {
+
     use ndarray::array;
+    use ndarray_rand::rand_distr::Distribution;
     use super::*;
     use float_cmp::approx_eq;
 
@@ -216,6 +218,110 @@ mod tests {
 
         test_pca(input, expected, None);
     }
+
+    use ndarray::Array2;
+    use ndarray_rand::RandomExt; // for creating random arrays
+    use rand::distributions::Uniform;
+    use rand::prelude::SeedableRng;
+    use rand_chacha::ChaCha8Rng;
+
+    // This helper function will make a random matrix that's size x size and check that there are no NaNs in the output
+    fn test_pca_random(size: usize, seed: u64) {
+        // Rng with input seed
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+
+        // Input is a size x size matrix with elements randomly chosen from a uniform distribution between -1.0 and 1.0
+        let input = Array2::<f64>::random_using((size, size), Uniform::new(-1.0, 1.0), &mut rng);
+
+        // Transform the input with PCA
+        let mut pca = PCA::new();
+        pca.fit(input.clone(), None).unwrap();
+        let output = pca.transform(input).unwrap();
+
+        // Assert that none of the values in the output are NaN
+        assert!(output.iter().all(|&x| !x.is_nan()));
+    }
+
+    #[test]
+    fn test_pca_random_2() {
+        test_pca_random(2, 1337);
+    }
+
+    #[test]
+    fn test_pca_random_64() {
+        test_pca_random(64, 1337);
+    }
+
+    #[test]
+    fn test_pca_random_256() {
+        test_pca_random(256, 1337);
+    }
+
+    #[test]
+    fn test_pca_random_512() {
+        test_pca_random(256, 1337);
+    }
+
+    fn test_pca_random_012(size: usize, seed: u64) {
+        // Rng with input seed
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+
+        // Input is a size x size matrix with elements randomly chosen from a uniform distribution between -1.0 and 1.0
+        // n.b. we need to use a discrete distribution
+        let input = Array2::<f64>::random_using((size, size), Uniform::new_inclusive(0, 2).map(|x| x as f64), &mut rng);
+
+        // Transform the input with PCA
+        let mut pca = PCA::new();
+        pca.fit(input.clone(), None).unwrap();
+        let output = pca.transform(input.clone()).unwrap();
+
+        // Assert that none of the values in the output are NaN
+        assert!(output.iter().all(|&x| !x.is_nan()));
+
+        /*
+        use std::fs::File;
+        use std::io::Write;
+        // write the input matrix to a file
+        let mut file = File::create(format!("test_pca_random_012_{}_{}_input.csv", size, seed)).unwrap();
+        input
+            .rows()
+            .into_iter()
+            .for_each(|row| writeln!(file, "{}", row.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(",")).unwrap());
+        
+        // write the result to a file
+        let mut file = File::create(format!("test_pca_random_012_{}_{}_output.csv", size, seed)).unwrap();
+        output
+            .rows()
+            .into_iter()
+        .for_each(|row| writeln!(file, "{}", row.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(",")).unwrap());
+        */
+    }
+
+    #[test]
+    fn test_pca_random_012_2() {
+        test_pca_random_012(2, 1337);
+    }
+
+    #[test]
+    fn test_pca_random_012_64() {
+        test_pca_random_012(64, 1337);
+    }
+
+    #[test]
+    fn test_pca_random_012_256() {
+        test_pca_random_012(256, 1337);
+    }
+
+    #[test]
+    fn test_pca_random_012_512() {
+        test_pca_random_012(256, 1337);
+    }
+
+    /*
+    #[test]
+    fn test_pca_random_012_1024() {
+        test_pca_random_012(1024, 1337);
+    }*/
 
     #[test]
     #[should_panic]
