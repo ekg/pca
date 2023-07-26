@@ -9,6 +9,7 @@ repository = "https://github.com/ekg/pca"
 readme = "README.md"
 keywords = ["statistics", "PCA"]
 categories = ["science"]
+documentation = "https://docs.rs/pca"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
