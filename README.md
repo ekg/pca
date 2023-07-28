@@ -1,4 +1,4 @@
-# Rust PCA library
+# Principal component analysis (PCA)
 
 This is a rust library for performing principal component analysis (PCA). It supports:
 
