@@ -4,6 +4,7 @@
 
 use ndarray::{Array1, Array2, Axis, s};
 use ndarray_linalg::svd::SVD;
+use rsvd::rsvd;
 use std::error::Error;
 
 /// Principal component analysis (PCA) structure
@@ -100,6 +101,75 @@ impl PCA {
         Ok(())
     }
 
+    /// Use randomized SVD to fit a PCA rotation to the data
+    ///
+    /// This computes the mean, scaling and rotation to apply PCA 
+    /// to the input data matrix.
+    ///
+    /// * `x` - Input data as a 2D array
+    /// * `n_components` - Number of components to keep
+    /// * `n_oversamples` - Number of oversampled dimensions (for rSVD)
+    /// * `tol` - Tolerance for excluding low variance components.
+    ///           If None, all components are kept.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input matrix has fewer than 2 rows.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ndarray::array;
+    /// use pca::PCA;
+    ///
+    /// let x = array![[1.0, 2.0], [3.0, 4.0]];
+    /// let mut pca = PCA::new();
+    /// pca.rfit(x, 1, 0, None, None).unwrap();
+    /// ```
+    pub fn rfit(&mut self, mut x: Array2<f64>,
+                n_components: usize, n_oversamples: usize,
+                seed: Option<u64>, tol: Option<f64>) -> Result<(), Box<dyn Error>> {
+        let n = x.nrows();
+        if n < 2 {
+            return Err("Input matrix must have at least 2 rows.".into());
+        }
+
+        // Compute mean for centering
+        let mean = x.mean_axis(Axis(0)).ok_or("Failed to compute mean")?;
+        self.mean = Some(mean.clone());
+        x -= &mean;
+
+        // Compute scale
+        let std_dev = x.map_axis(Axis(0), |v| v.std(1.0));
+        self.scale = Some(std_dev.clone());
+        x /= &std_dev.mapv(|v| if v != 0. { v } else { 1. });
+
+        let k = std::cmp::min(n, x.ncols());
+
+        // Compute SVD
+        let (_u, mut s, vt) = rsvd(&x, n_components, n_oversamples, seed);
+        //.map_err(|_| "Failed to compute SVD")?;
+
+        // Normalize singular values
+        s.mapv_inplace(|v| v / ((n as f64 - 1.0).max(1.0)).sqrt());
+
+        // Compute Rotation
+        let rotation;
+        if let Some(t) = tol {
+            // convert diagonal matrix s into a vector
+            let s = s.diag().to_owned();
+            let threshold = s[0] * t;
+            let rank = s.iter().take_while(|&si| *si > threshold).count();
+            rotation = vt.slice_move(s![..std::cmp::min(rank, k), ..]).reversed_axes();
+        } else {
+            rotation = vt.slice_move(s![..k, ..]).reversed_axes();
+        }
+        self.rotation = Some(rotation);
+
+        Ok(())
+    }
+
+
     /// Apply the PCA rotation to the data
     ///
     /// This projects the data into the PCA space using the 
@@ -140,10 +210,11 @@ mod tests {
 
     use ndarray::array;
     use ndarray_rand::rand_distr::Distribution;
+    use ndarray_rand::rand_distr::Normal;
     use super::*;
     use float_cmp::approx_eq;
 
-    fn test_pca(input: Array2<f64>, expected_output: Array2<f64>, tol: Option<f64>) {
+    fn test_pca(input: Array2<f64>, expected_output: Array2<f64>, tol: Option<f64>, e: f64) {
         let mut pca = PCA::new();
         pca.fit(input.clone(), tol).unwrap();
         let output = pca.transform(input).unwrap();
@@ -158,7 +229,27 @@ mod tests {
         // Compare arrays
         let equal = output_abs.shape() == expected_output_abs.shape() &&
             output_abs.iter().zip(expected_output_abs.iter())
-                      .all(|(a, b)| approx_eq!(f64, *a, *b, epsilon = 1.0e-6));
+                      .all(|(a, b)| approx_eq!(f64, *a, *b, epsilon = e));
+        assert!(equal);
+    }
+
+    fn test_rpca(input: Array2<f64>, expected_output: Array2<f64>,
+                 n_components: usize, n_oversamples: usize, tol: Option<f64>, e: f64) {
+        let mut pca = PCA::new();
+        pca.rfit(input.clone(), n_components, n_oversamples, Some(1926), tol).unwrap();
+        let output = pca.transform(input).unwrap();
+
+        eprintln!("output: {:?}", output);
+        eprintln!("expected_output: {:?}", expected_output);
+        
+        // Calculate absolute values for arrays
+        let output_abs = output.mapv_into(f64::abs);
+        let expected_output_abs = expected_output.mapv_into(f64::abs);
+
+        // Compare arrays
+        let equal = output_abs.shape() == expected_output_abs.shape() &&
+            output_abs.iter().zip(expected_output_abs.iter())
+                      .all(|(a, b)| approx_eq!(f64, *a, *b, epsilon = e));
         assert!(equal);
     }
 
@@ -169,9 +260,29 @@ mod tests {
         let expected = array![[-1.0, 4.109492e-16],
                               [1.0, 2.647088e-16]];
 
-        test_pca(input, expected, None);
+        test_pca(input, expected, None, 1e-6);
     }
-    
+
+    #[test]
+    fn test_rpca_2x2() {
+        let input = array![[0.5855288, -0.1093033], 
+                           [0.7094660, -0.4534972]];
+        let expected = array![[-1.0, 4.109492e-16],
+                              [1.0, 2.647088e-16]];
+
+        test_rpca(input, expected, 2, 0, None, 1e-6);
+    }
+
+    #[test]
+    fn test_rpca_2x2_k1() {
+        let input = array![[0.5855288, -0.1093033], 
+                           [0.7094660, -0.4534972]];
+        let expected = array![[-1.0, 4.109492e-16],
+                              [1.0, 2.647088e-16]];
+
+        test_rpca(input, expected, 1, 0, None, 1e-6);
+    }
+
     #[test]
     fn test_pca_3x5() {
         let input = array![[0.5855288, -0.4534972, 0.6300986, -0.9193220, 0.3706279],
@@ -182,7 +293,7 @@ mod tests {
                               [-1.098771, -1.03624808, 1.566910e-16],
                               [2.295834, 0.02916061, 3.427952e-17]];
 
-        test_pca(input, expected, None);
+        test_pca(input, expected, None, 1e-6);
     }
 
     #[test]  
@@ -199,7 +310,7 @@ mod tests {
                               [1.0944225, -1.5788366, -0.57193457, -0.2771233, 4.276631e-16],
                               [1.1362824, 0.6010291, 1.07545409, -0.2597919, -6.793015e-17]];
 
-        test_pca(input, expected, None);
+        test_pca(input, expected, None, 1e-6);
     }
 
     #[test]
@@ -216,13 +327,76 @@ mod tests {
                               [0.5487077, 1.8825193, -0.30961285, 0.511856077, 3.404246e-15],
                               [1.3564746, -0.5038210, 1.77985239, -0.003410674, -3.187086e-16]];
 
-        test_pca(input, expected, None);
+        test_pca(input, expected, None, 1e-6);
+    }
+
+    #[test]
+    fn test_rpca_5x7_k3() {
+        let input = array![[0.5855288, -1.8179560, -0.1162478, 0.8168998, 0.7796219, 1.8050975, 0.8118732],
+                           [0.7094660, 0.6300986, 1.8173120, -0.8863575, 1.4557851, -0.4816474, 2.1968335],
+                           [-0.1093033, -0.2761841, 0.3706279, -0.3315776, -0.6443284, 0.6203798, 2.0491903],
+                           [-0.4534972, -0.2841597, 0.5202165, 1.1207127, -1.5531374, 0.6121235, 1.6324456],
+                           [0.6058875, -0.9193220, -0.7505320, 0.2987237, -1.5977095, -0.1623110, 0.2542712]];
+        
+        let expected = array![[1.7585642, -1.3627442, -1.26793991, 0.050491148, -2.437707e-16],
+                              [-3.0789816, -0.8169344, 0.05331594, 0.277390220, 3.028250e-15],
+                              [-0.5847649, 0.8009802, -0.25561556, -0.836326771, -5.830345e-15],
+                              [0.5487077, 1.8825193, -0.30961285, 0.511856077, 3.404246e-15],
+                              [1.3564746, -0.5038210, 1.77985239, -0.003410674, -3.187086e-16]];
+
+        test_rpca(input, expected, 4, 0, None, 1e-6);
+    }
+
+    // helper to make a random matrix with a given number of rows and columns
+    fn make_random_matrix(rows: usize, cols: usize, seed: Option<u64>) -> Array2<f64> {
+        let rng = match seed {
+            Some(s) => ChaCha8Rng::seed_from_u64(s),
+            None => ChaCha8Rng::from_rng(thread_rng()).unwrap(),
+        };
+        let x = {
+            let vec = rng.sample_iter(Normal::new(0.0, 1.0).unwrap())
+                .take(rows * cols)
+                .collect::<Vec<_>>();
+            ndarray::Array::from_shape_vec((rows, cols), vec).unwrap()
+        };
+        x
+    }
+    
+    // this helper test function compares randomized pca to the regular pca
+    // the randomized pca is expected to be less accurate, but faster
+    fn compare_rpca_to_pca(m: usize, n: usize, expected: Array2<f64>, k: usize, p: usize, seed: Option<u64>, e: f64) {
+
+        let mut pca = PCA::new();
+        let mut rpca = PCA::new();
+
+        let input = make_random_matrix(m, n, seed);
+
+        pca.fit(input.clone(), None).unwrap();
+        rpca.rfit(input.clone(), k, p, seed, None).unwrap();
+
+        // get the components
+        let output_pca = pca.transform(input.clone()).unwrap();
+        let output_rpca = pca.transform(input).unwrap();
+        // check that the output arrays are equivalent
+
+        assert!(equivalent(&output_pca, &output_rpca, e));
+    }
+
+    fn equivalent(a: &Array2<f64>, b: &Array2<f64>, e: f64) -> bool {
+        let a = a.clone().mapv_into(f64::abs);
+        let b = b.clone().mapv_into(f64::abs);
+        // sum of absolute differences
+        let diff = a - b;
+        // average difference per cell
+        let avg = diff.sum() / (diff.len() as f64);
+        avg < e
     }
 
     use ndarray::Array2;
     use ndarray_rand::RandomExt; // for creating random arrays
     use rand::distributions::Uniform;
     use rand::prelude::SeedableRng;
+    use rand::{thread_rng, Rng};
     use rand_chacha::ChaCha8Rng;
 
     // This helper function will make a random matrix that's size x size and check that there are no NaNs in the output
