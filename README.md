@@ -30,20 +30,13 @@ pca.fit(x.clone(), None).unwrap();
 let transformed = pca.transform(x).unwrap();
 ```
 
-The `fit()` method computes the PCA rotation matrix, mean and scaling factors. It takes the input data and an optional variance explained tolerance. 
+The `fit()` method computes the PCA rotation matrix, mean and scaling factors. It takes the input data and an optional variance explained tolerance threshold, to remove PCs with low explanatory power.
 
 The `transform()` method applies the PCA rotation to project new data into the PCA space.
 
 ## Installation
 
-Add this to your `Cargo.toml`:
-
-```toml
-[dependencies]
-pca = "0.1.2"
-```
-
-Or just `cargo add pca` to get the latest version.
+Use `cargo add pca` to get the latest version.
 
 ## Authors
 

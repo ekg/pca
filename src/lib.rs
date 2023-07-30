@@ -65,6 +65,8 @@ impl PCA {
     /// ```
     pub fn fit(&mut self, mut x: Array2<f64>, tol: Option<f64>) -> Result<(), Box<dyn Error>> {
         let n = x.nrows();
+        let m = x.ncols();
+        let k = std::cmp::min(n, m);
         if n < 2 {
             return Err("Input matrix must have at least 2 rows.".into());
         }
@@ -78,8 +80,6 @@ impl PCA {
         let std_dev = x.map_axis(Axis(0), |v| v.std(1.0));
         self.scale = Some(std_dev.clone());
         x /= &std_dev.mapv(|v| if v != 0. { v } else { 1. });
-
-        let k = std::cmp::min(n, x.ncols());
 
         // Compute SVD
         let (_u, mut s, vt) = x.svd(true, true).map_err(|_| "Failed to compute SVD")?;
@@ -130,6 +130,8 @@ impl PCA {
                 n_components: usize, n_oversamples: usize,
                 seed: Option<u64>, tol: Option<f64>) -> Result<(), Box<dyn Error>> {
         let n = x.nrows();
+        let m = x.ncols();
+        let k = std::cmp::min(n, m);
         if n < 2 {
             return Err("Input matrix must have at least 2 rows.".into());
         }
@@ -143,8 +145,6 @@ impl PCA {
         let std_dev = x.map_axis(Axis(0), |v| v.std(1.0));
         self.scale = Some(std_dev.clone());
         x /= &std_dev.mapv(|v| if v != 0. { v } else { 1. });
-
-        let k = std::cmp::min(n, x.ncols());
 
         // Compute SVD
         let (_u, mut s, vt) = rsvd(&x, n_components, n_oversamples, seed);
@@ -219,8 +219,8 @@ mod tests {
         pca.fit(input.clone(), tol).unwrap();
         let output = pca.transform(input).unwrap();
 
-        eprintln!("output: {:?}", output);
-        eprintln!("expected_output: {:?}", expected_output);
+        //eprintln!("output: {:?}", output);
+        //eprintln!("expected_output: {:?}", expected_output);
         
         // Calculate absolute values for arrays
         let output_abs = output.mapv_into(f64::abs);
@@ -239,8 +239,8 @@ mod tests {
         pca.rfit(input.clone(), n_components, n_oversamples, Some(1926), tol).unwrap();
         let output = pca.transform(input).unwrap();
 
-        eprintln!("output: {:?}", output);
-        eprintln!("expected_output: {:?}", expected_output);
+        //eprintln!("output: {:?}", output);
+        //eprintln!("expected_output: {:?}", expected_output);
         
         // Calculate absolute values for arrays
         let output_abs = output.mapv_into(f64::abs);
@@ -348,35 +348,132 @@ mod tests {
     }
 
     // helper to make a random matrix with a given number of rows and columns
+    /*
     fn make_random_matrix(rows: usize, cols: usize, seed: Option<u64>) -> Array2<f64> {
         let rng = match seed {
             Some(s) => ChaCha8Rng::seed_from_u64(s),
             None => ChaCha8Rng::from_rng(thread_rng()).unwrap(),
         };
-        let x = {
+        {
             let vec = rng.sample_iter(Normal::new(0.0, 1.0).unwrap())
                 .take(rows * cols)
                 .collect::<Vec<_>>();
             ndarray::Array::from_shape_vec((rows, cols), vec).unwrap()
+        }
+    }*/
+
+    fn make_random_matrix<T>(rows: usize, cols: usize, distrib: T, seed: Option<u64>) -> Array2<f64>
+    where
+        T: Distribution<f64>, 
+    {
+        let rng = match seed {
+            Some(s) => ChaCha8Rng::seed_from_u64(s),
+            None => ChaCha8Rng::from_rng(thread_rng()).unwrap(),
         };
-        x
+
+        let vec = rng.sample_iter(distrib)
+            .take(rows * cols)
+            .collect::<Vec<_>>();
+
+        ndarray::Array2::from_shape_vec((rows, cols), vec).unwrap()
+    }
+
+    //use ndarray::{Array1, Array2};
+    //use rand::{Rng};
+    //use ndarray_rand::rand_distr::SparseBinary;
+    pub struct SparseBinary {
+        p: f64
+    }
+
+    impl SparseBinary {
+        pub fn new(p: f64) -> Self {
+            SparseBinary { p }
+        }
+    }
+
+    impl Distribution<f64> for SparseBinary {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
+            if rng.gen::<f64>() < self.p {
+                1.0
+            } else {
+                0.0
+            }
+        }
+    }
+
+    fn normalize_cols(matrix: Array2<f64>) -> Array2<f64> {
+        let mut matrix = matrix.to_owned();
+        // Center each column
+        for mut col in matrix.axis_iter_mut(Axis(1)) {
+            let mean = col.mean().unwrap();
+            col.mapv_inplace(|x| x - mean); 
+        }
+        // Normalize each column
+        for mut col in matrix.axis_iter_mut(Axis(1)) {
+            let std_dev = col.std(1.0);
+            if std_dev != 0.0 {
+                col.mapv_inplace(|x| x / std_dev);
+            }
+        }
+        matrix
+    }
+
+    // Generate low-rank matrix
+    fn low_rank(m: usize, n: usize, k: usize, seed: u64) -> Array2<f64> {
+
+        let u = make_random_matrix(m, k, Normal::new(0.0, 1.0).unwrap(), Some(seed)); 
+        let v = make_random_matrix(n, k, Normal::new(0.0, 1.0).unwrap(), Some(seed));
+
+        u.dot(&v.t())
+    }
+
+    // Spiked covariance model    
+    fn spiked_cov(m: usize, n: usize, seed: u64) -> Array2<f64> {
+        let x = make_random_matrix(m, n, Normal::new(0.0, 1.0).unwrap(), Some(seed));
+        let y = make_random_matrix(n, 1, SparseBinary::new(0.1), Some(seed)); 
+        let yy = &y * &y.t();
+
+        x + yy
+    }
+
+    // Introduce smoother structure
+    fn smooth_struct(m: usize, n: usize, seed: u64) -> Array2<f64> {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let mut a = Array2::zeros((m, n));
+
+        for i in 0..m {
+            for j in 0..n {
+                if i == 0 && j == 0 {
+                    a[[i, j]] = rng.sample(Normal::new(0.0, 1.0).unwrap()); 
+                } else {
+                    let prev_i = if i > 0 {i-1} else {0};
+                    let prev_j = if j > 0 {j-1} else {0};
+                    a[[i, j]] = 0.5 * a[[prev_i, j]] + 0.5 * a[[i, prev_j]];
+                }
+            }
+        }
+        
+        a
     }
     
     // this helper test function compares randomized pca to the regular pca
     // the randomized pca is expected to be less accurate, but faster
-    fn compare_rpca_to_pca(m: usize, n: usize, expected: Array2<f64>, k: usize, p: usize, seed: Option<u64>, e: f64) {
+    fn compare_rpca_to_pca(m: usize, n: usize, rank: usize, k: usize, p: usize, seed: Option<u64>, e: f64) {
 
         let mut pca = PCA::new();
         let mut rpca = PCA::new();
 
-        let input = make_random_matrix(m, n, seed);
+        // this should be really easy for rpca to get
+        // so long as k + p >= rank
+        // but if our rank is too large then noise will dominate
+        let input = low_rank(m, n, rank, seed.unwrap());
 
         pca.fit(input.clone(), None).unwrap();
         rpca.rfit(input.clone(), k, p, seed, None).unwrap();
 
         // get the components
         let output_pca = pca.transform(input.clone()).unwrap();
-        let output_rpca = pca.transform(input).unwrap();
+        let output_rpca = rpca.transform(input).unwrap();
         // check that the output arrays are equivalent
 
         assert!(equivalent(&output_pca, &output_rpca, e));
@@ -385,11 +482,39 @@ mod tests {
     fn equivalent(a: &Array2<f64>, b: &Array2<f64>, e: f64) -> bool {
         let a = a.clone().mapv_into(f64::abs);
         let b = b.clone().mapv_into(f64::abs);
-        // sum of absolute differences
-        let diff = a - b;
+        // absolute differences
+        let diff = (a - b).mapv_into(f64::abs);
         // average difference per cell
         let avg = diff.sum() / (diff.len() as f64);
+        // absolute value of average difference
+        let avg = avg.abs();
+        eprintln!("avg abs diff: {}", avg);
         avg < e
+    }
+
+    #[test]
+    fn test_rpca_equiv_10x10_k5_o1() {
+        compare_rpca_to_pca(10, 10, 5, 5, 1, Some(1926), 1e-2);
+    }
+
+    #[test]
+    fn test_rpca_equiv_100x100_k10_o5() {
+        compare_rpca_to_pca(100, 100, 15, 10, 5, Some(1926), 1e-2);
+    }
+
+    #[test]
+    fn test_rpca_equiv_100x100_k5_o2() {
+        compare_rpca_to_pca(100, 100, 6, 5, 2, Some(1926), 1e-2);
+    }
+
+    #[test]
+    fn test_rpca_equiv_100x100_k20_o5() {
+        compare_rpca_to_pca(100, 100, 25, 20, 5, Some(1926), 1e-2);
+    }
+
+    #[test]
+    fn test_rpca_equiv_100x100_k2_o0() {
+        compare_rpca_to_pca(100, 100, 2, 2, 0, Some(1926), 1e-2);
     }
 
     use ndarray::Array2;
